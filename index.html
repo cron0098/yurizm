@@ -235,6 +235,7 @@
   .f-sess{flex:0 0 96px;min-width:96px}
   .tablewrap{overflow-x:auto}
   .m-name{font-weight:700}
+  .m-note{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.4;max-width:260px;white-space:pre-wrap}
   .m-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:0;box-shadow:0 0 0 2px rgba(255,255,255,.06)}
   .sess{display:inline-flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--line2);border-radius:999px;padding:4px 6px}
   .sess .stp{width:30px;height:30px;border-radius:50%;border:0;background:var(--surface2);color:var(--ink);font-size:18px;font-weight:800;line-height:1;display:flex;align-items:center;justify-content:center;transition:.15s}
@@ -426,7 +427,7 @@ async function loadAll(){
     toast("데이터를 불러오지 못했어요. 설정을 확인하세요.",true);
     return false;
   }
-  state.members = (mRes.data||[]).map(r=>({id:r.id,name:r.name,phone:r.phone,sessions:r.sessions}));
+  state.members = (mRes.data||[]).map(r=>({id:r.id,name:r.name,phone:r.phone,sessions:r.sessions,note:r.note||""}));
   state.schedules = {};
   (sRes.data||[]).forEach(r=>{
     state.schedules[dateToKey(new Date(r.slot_at))] = {memberId:r.member_id, createdBy:r.created_by};
@@ -480,6 +481,8 @@ const REASON = {
   dup:"이미 등록된 항목이에요.",
   wrong_pin:"현재 비밀번호가 올바르지 않아요.",
   too_short:"새 비밀번호는 4자 이상이어야 해요.",
+  no_recovery:"복구 질문이 등록되어 있지 않아요.",
+  wrong_answer:"정답이 올바르지 않아요.",
   error:"처리 중 오류가 발생했어요.",
 };
 
@@ -555,7 +558,7 @@ function chooseRole(){
     <p>역할을 선택하세요. 프로토타입이라 한 화면에서 트레이너와 회원 흐름을 모두 체험할 수 있어요.</p>
     <div class="field"><button class="btn ghost" id="goAdmin">트레이너로 시작</button></div>
     <div class="field"><button class="btn accent" id="goUser">회원으로 시작</button></div>
-    <div class="hint">트레이너 비밀번호: <code>1234</code><br>회원 전화번호 예시: <code>010-1111-2222</code> (김지우)</div>
+
   </div>`;
 }
 function bindChoose(){
@@ -573,7 +576,9 @@ function adminGate(){
     <div class="field"><label>비밀번호</label><input id="pin" type="password" placeholder="••••" autocomplete="off"></div>
     <button class="btn" id="doAdmin">입장</button>
     <div class="err" id="gErr"></div>
-    <div class="hint">예시 비밀번호: <code>1234</code></div>
+    <div style="text-align:center;margin-top:16px">
+      <a href="#" id="forgotPin" style="color:var(--muted);font-size:13px;text-decoration:underline">비밀번호를 잊으셨나요?</a>
+    </div>
   </div>`;
 }
 function userGate(){
@@ -585,7 +590,7 @@ function userGate(){
     <div class="field"><label>휴대폰 번호</label><input id="phone" type="tel" placeholder="010-0000-0000"></div>
     <button class="btn accent" id="doUser">입장</button>
     <div class="err" id="gErr"></div>
-    <div class="hint">예시: <code>010-1111-2222</code> (김지우) · <code>010-3333-4444</code> (박서준)</div>
+
   </div>`;
 }
 function bindGate(){
@@ -598,6 +603,37 @@ function bindGate(){
       else document.getElementById("gErr").textContent="비밀번호가 올바르지 않아요.";
     };
     inp.addEventListener("keydown",e=>{if(e.key==="Enter")document.getElementById("doAdmin").click();});
+    const forgot=document.getElementById("forgotPin");
+    if(forgot) forgot.onclick=async (e)=>{
+      e.preventDefault();
+      const r=await rpc("get_recovery_question",{});
+      if(!r || !r.has){
+        openModal(`
+          <h3>비밀번호 복구</h3>
+          <div class="when">복구 질문 미등록</div>
+          <p style="font-size:14px;margin:0">아직 복구 질문이 등록되어 있지 않아요. 로그인 후 설정 탭에서 복구 질문을 먼저 등록할 수 있어요. 비밀번호를 완전히 잊었다면 Supabase 관리 화면에서 초기화해야 합니다.</p>
+          <div class="row"><button class="btn" onclick="closeModal()">확인</button></div>`);
+        return;
+      }
+      openModal(`
+        <h3>비밀번호 복구</h3>
+        <div class="when">${esc(r.question)}</div>
+        <p style="font-size:14px;margin:0 0 4px">위 질문의 정답을 입력하면 비밀번호가 <b>1234</b>로 초기화됩니다.</p>
+        <div class="field"><label>정답</label><input id="recA" placeholder="정답 입력" autocomplete="off"></div>
+        <div class="err" id="recErr" style="color:var(--warn);font-size:13px;min-height:18px"></div>
+        <div class="row">
+          <button class="btn ghost" onclick="closeModal()">취소</button>
+          <button class="btn" id="recDo">초기화</button>
+        </div>`);
+      const ra=document.getElementById("recA"); ra.focus();
+      const run=async ()=>{
+        const rr=await rpc("recover_pin",{p_answer:ra.value});
+        if(rr.ok){ closeModal(); toast("비밀번호를 1234로 초기화했어요. 1234로 로그인하세요."); }
+        else document.getElementById("recErr").textContent = REASON[rr.reason]||"초기화 실패";
+      };
+      document.getElementById("recDo").onclick=run;
+      ra.addEventListener("keydown",ev=>{if(ev.key==="Enter")run();});
+    };
     inp.focus();
   } else if(state.role==="user"){
     const inp=document.getElementById("phone");
@@ -646,7 +682,7 @@ function adminView(){
 function membersPanel(){
   const rows = state.members.length ? state.members.map(m=>`
     <tr>
-      <td><span class="m-dot" style="background:${memberColor(m.id).bg}"></span><span class="m-name">${esc(m.name)}</span></td>
+      <td><span class="m-dot" style="background:${memberColor(m.id).bg}"></span><span class="m-name">${esc(m.name)}</span>${m.note?`<div class="m-note">${esc(m.note)}</div>`:''}</td>
       <td class="m-phone">${esc(m.phone)}</td>
       <td>
         <div class="sess">
@@ -667,6 +703,7 @@ function membersPanel(){
         <div class="field"><label>이름</label><input id="mName" placeholder="회원 이름"></div>
         <div class="field"><label>휴대폰 번호</label><input id="mPhone" placeholder="010-0000-0000"></div>
         <div class="field f-sess"><label>PT 횟수</label><input id="mSess" type="number" min="0" value="10"></div>
+        <div class="field" style="flex:2;min-width:180px"><label>비고 (선택)</label><input id="mNote" placeholder="특이사항 · 부상 · 목표 등"></div>
         <button class="btn" id="addMember">회원 등록</button>
       </div>
       <div class="tablewrap">
@@ -808,6 +845,8 @@ function snapshotTable(snap){
 
 /* ---------- 설정 패널 (비밀번호 변경) ---------- */
 function settingsPanel(){
+  const q = state.recoveryQuestion || "";
+  const hasR = state.recoveryHas;
   return `
     <div class="panel-head"><h2>설정</h2><span class="who">트레이너 비밀번호 관리</span></div>
     <div class="card" style="max-width:460px">
@@ -817,6 +856,16 @@ function settingsPanel(){
       <div class="field"><label>새 비밀번호 확인</label><input id="pwNew2" type="password" placeholder="새 비밀번호 다시 입력" autocomplete="off"></div>
       <button class="btn" id="savePw">비밀번호 변경</button>
       <div class="hint">변경 후에는 새 비밀번호로 로그인됩니다. 잊지 않도록 안전한 곳에 보관하세요.</div>
+    </div>
+
+    <div class="card" style="max-width:460px;margin-top:18px">
+      <h3 style="font-size:14px;margin:0 0 6px">비밀번호 복구 질문</h3>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px">비밀번호를 잊었을 때, 이 질문의 정답을 맞히면 비밀번호가 1234로 초기화됩니다. ${hasR?'<b style="color:var(--lime)">현재 등록되어 있어요.</b>':'<b style="color:var(--warn)">아직 등록되지 않았어요.</b>'}</p>
+      <div class="field"><label>확인용 현재 비밀번호</label><input id="rCur" type="password" placeholder="현재 비밀번호" autocomplete="off"></div>
+      <div class="field"><label>복구 질문</label><input id="rQ" placeholder="예: 내 첫 반려동물 이름은?" value="${esc(q)}"></div>
+      <div class="field"><label>복구 정답</label><input id="rA" placeholder="정답 (대소문자·공백 무시)" autocomplete="off"></div>
+      <button class="btn" id="saveRecovery">복구 질문 저장</button>
+      <div class="hint">정답은 안전하게 보관되며 화면에 다시 표시되지 않아요. 질문을 바꾸려면 정답도 다시 입력하세요.</div>
     </div>`;
 }
 
@@ -1026,10 +1075,18 @@ function bindAdmin(){
   if(state.view==="settings") bindSettings();
 }
 
-function bindSettings(){
+async function bindSettings(){
+  // 복구 질문 최초 로드
+  if(!state._recoveryLoaded){
+    const r=await rpc("get_recovery_question",{});
+    state.recoveryQuestion = (r&&r.question)||"";
+    state.recoveryHas = !!(r&&r.has);
+    state._recoveryLoaded = true;
+    render();
+    return;
+  }
   const btn=document.getElementById("savePw");
-  if(!btn) return;
-  btn.onclick=async ()=>{
+  if(btn) btn.onclick=async ()=>{
     const cur=document.getElementById("pwCur").value;
     const n1=document.getElementById("pwNew").value;
     const n2=document.getElementById("pwNew2").value;
@@ -1041,6 +1098,17 @@ function bindSettings(){
     document.getElementById("pwNew").value="";
     document.getElementById("pwNew2").value="";
     toast("비밀번호를 변경했어요.");
+  };
+  const rb=document.getElementById("saveRecovery");
+  if(rb) rb.onclick=async ()=>{
+    const cur=document.getElementById("rCur").value;
+    const q=document.getElementById("rQ").value.trim();
+    const a=document.getElementById("rA").value.trim();
+    if(!q||!a){ toast("질문과 정답을 모두 입력하세요.",true); return; }
+    const r=await rpc("admin_set_recovery",{p_current:cur,p_question:q,p_answer:a});
+    if(!r.ok){ toast(REASON[r.reason]||"저장 실패",true); return; }
+    state._recoveryLoaded=false; // 다시 로드
+    toast("복구 질문을 저장했어요."); await bindSettings(); render();
   };
 }
 
@@ -1086,8 +1154,9 @@ function bindMembers(){
     const name=document.getElementById("mName").value.trim();
     const phone=document.getElementById("mPhone").value.trim();
     const sess=Math.max(0, parseInt(document.getElementById("mSess").value,10)||0);
+    const note=document.getElementById("mNote").value.trim();
     if(!name||!phone){ toast("이름과 번호를 모두 입력하세요.",true); return; }
-    const r=await rpc("admin_upsert_member",{p_id:null,p_name:name,p_phone:phone,p_sessions:sess});
+    const r=await rpc("admin_upsert_member",{p_id:null,p_name:name,p_phone:phone,p_sessions:sess,p_note:note||null});
     if(!r.ok){ toast(REASON[r.reason]||"등록 실패",true); return; }
     await loadAll(); toast("회원을 등록했어요."); render();
   };
@@ -1124,6 +1193,7 @@ function bindMembers(){
         <div class="field"><label>이름</label><input id="eName" value="${esc(m.name)}"></div>
         <div class="field"><label>휴대폰 번호</label><input id="ePhone" value="${esc(m.phone)}"></div>
         <div class="field"><label>PT 잔여 횟수</label><input id="eSess" type="number" min="0" value="${m.sessions}"></div>
+        <div class="field"><label>비고 (특이사항)</label><textarea id="eNote" rows="3" style="width:100%;padding:13px 14px;border:1px solid var(--line2);border-radius:11px;background:var(--bg);font-size:15px;color:var(--ink);resize:vertical;font-family:inherit">${esc(m.note||"")}</textarea></div>
         <div class="row">
           <button class="btn ghost" onclick="closeModal()">취소</button>
           <button class="btn" id="confEdit">저장</button>
@@ -1132,8 +1202,9 @@ function bindMembers(){
         const name=document.getElementById("eName").value.trim();
         const phone=document.getElementById("ePhone").value.trim();
         const sess=Math.max(0, parseInt(document.getElementById("eSess").value,10)||0);
+        const note=document.getElementById("eNote").value.trim();
         if(!name||!phone){ toast("빈 칸을 채워주세요.",true); return; }
-        const r=await rpc("admin_upsert_member",{p_id:m.id,p_name:name,p_phone:phone,p_sessions:sess});
+        const r=await rpc("admin_upsert_member",{p_id:m.id,p_name:name,p_phone:phone,p_sessions:sess,p_note:note||null});
         if(!r.ok){ toast(REASON[r.reason]||"저장 실패",true); return; }
         await loadAll(); closeModal(); toast("저장했어요."); render();
       };
